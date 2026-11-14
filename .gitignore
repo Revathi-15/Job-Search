@@ -1,6 +1,10 @@
 # Secrets - NEVER push these
 .env
 
+# Resume - private document
+*.pdf
+REVATHI_SANGAM.pdf
+
 # Database and logs (large, local only)
 tracker.db
 *.lock
