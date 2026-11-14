@@ -7,6 +7,7 @@ REVATHI_SANGAM.pdf
 
 # Database and logs (large, local only)
 tracker.db
+audit_log.csv
 *.lock
 send_log.txt
 send_err.txt
