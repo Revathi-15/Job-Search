@@ -1,11 +1,11 @@
-# Secrets - NEVER push these
+# Secrets - NEVER push
 .env
 
 # Resume - private document
 *.pdf
 REVATHI_SANGAM.pdf
 
-# Database and logs (large, local only)
+# Database and tracking files - local only
 tracker.db
 audit_log.csv
 *.lock
@@ -13,10 +13,19 @@ send_log.txt
 send_err.txt
 error.log
 
+# Excel files - local only
+*.xlsx
+*.xls
+
+# ATS cache - local only
+ats_cache.json
+watchlist.csv
+
 # Python cache
 __pycache__/
 *.pyc
+*.pyo
 
 # Excel temp files
-~$*.xlsx
+~$*
 _tracker_tmp.xlsx
