@@ -13,7 +13,7 @@ import random, time, sys
 import common as C
 import outreach
 
-BATCH = 15
+BATCH = 50
 
 c = C.db()
 
