@@ -13,9 +13,9 @@ send_log.txt
 send_err.txt
 error.log
 
-# Excel files - local only
-*.xlsx
-*.xls
+# Excel files - only ignore the tracker (auto-generated), keep the contact sheets
+Job_Outreach_Tracker*.xlsx
+_tracker_tmp.xlsx
 
 # ATS cache - local only
 ats_cache.json
