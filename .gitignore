@@ -1,11 +1,27 @@
-# Secrets - NEVER push
+# =============================================================
+# SECRETS — never push
+# =============================================================
 .env
+# .env.example is safe to push (no real credentials), but kept
+# out anyway because it was previously committed with real data
+.env.example
 
-# Resume - private document
+# =============================================================
+# PERSONAL / PRIVATE DATA
+# =============================================================
+# Resume
 *.pdf
 REVATHI_SANGAM.pdf
 
-# Database and tracking files - local only
+# Contact email lists — contain third-party email addresses
+*.xlsx
+*.xls
+# (requirements.txt, README.md etc. are still tracked — only
+#  Excel files are excluded by the rule above)
+
+# =============================================================
+# DATABASE & TRACKING — local machine only
+# =============================================================
 tracker.db
 audit_log.csv
 *.lock
@@ -13,19 +29,24 @@ send_log.txt
 send_err.txt
 error.log
 
-# Excel files - only ignore the tracker (auto-generated), keep the contact sheets
-Job_Outreach_Tracker*.xlsx
-_tracker_tmp.xlsx
-
-# ATS cache - local only
+# =============================================================
+# GENERATED / CACHE — no value in version control
+# =============================================================
 ats_cache.json
 watchlist.csv
+_tracker_tmp.xlsx
+Job_Outreach_Tracker*.xlsx
 
-# Python cache
+# =============================================================
+# PYTHON CACHE
+# =============================================================
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.Python
 
-# Excel temp files
+# =============================================================
+# EXCEL TEMP FILES
+# =============================================================
 ~$*
-_tracker_tmp.xlsx

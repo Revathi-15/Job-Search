@@ -36,17 +36,18 @@ from common import audit, audit_once_today
 SUBJECT = ("Application for Software Development Engineer - Revathi Sangam | "
            "Amazon & Publicis Sapient Intern")
 
-P_INTRO = "I hope this email finds you well."
-P_EXP   = ("I'm Revathi Sangam, a recent B.Tech graduate in Computer Science from NIT Durgapur (CGPA: 8.91). "
-            "I have internship experience from Amazon and Publicis Sapient, where I worked across the SDLC, "
-            "collaborated with cross-functional teams and stakeholders, prepared design documents, and delivered "
-            "tasks end to end. I also gained hands-on experience in backend development, API design, debugging, "
-            "testing, resolving tickets, and handling critical production issues.")
-P_CTA    = ("I'm reaching out to explore SDE opportunities at {company}. I've attached my resume and would "
-            "appreciate your consideration for any suitable openings or a referral to the relevant hiring manager.")
-P_ATTACH = "You can also find my work here: [[LI]] | [[GH]]."
-P_THANKS = "Thank you for your time and consideration!"
-SIGN     = f"Best regards,\n{C.SENDER_NAME}\n{C.PHONE} | {C.GMAIL_USER}"
+P_INTRO  = ("I'm Revathi Sangam, a 2026 B.Tech CSE graduate from NIT Durgapur (CGPA: 8.91), "
+            "with internship experience at Amazon and Publicis Sapient.")
+P_EXP    = ("I have experience across the SDLC, including backend development, API design, testing, "
+            "debugging, production issue resolution, design documentation and cross-functional collaboration. "
+            "At Amazon, I built a self-service portal that reduced configuration turnaround from 5\u20138 days "
+            "to 5 minutes and resolved critical production issues impacting 10+ vendors. At Publicis Sapient, "
+            "I developed an AI agent-based application that reduced manual query effort by 87%.")
+P_CTA    = ("I'm exploring Software Development Engineer opportunities at {company} and would appreciate "
+            "your consideration for suitable openings or a referral to the relevant hiring manager.")
+P_ATTACH = "Resume attached for your reference.\n\n[[LI]] | [[GH]]"
+P_THANKS = ""
+SIGN     = f"Regards,\n{C.SENDER_NAME}\n{C.PHONE}"
 
 F_1   = ("I hope you're having a productive week! I'm following up on my earlier note regarding SDE "
          "opportunities at {company}.")
@@ -57,11 +58,17 @@ SIGN_F = f"{C.SENDER_NAME}\n{C.PHONE} | {C.GMAIL_USER}"
 
 
 def render(company, name, followup=False):
-    greet = f"Hi {name}," if name else "Hi there,"
-    paras = ([greet, F_1.format(company=company), F_2, F_3, SIGN_F] if followup
-             else [greet, P_INTRO, P_EXP, P_CTA.format(company=company), P_ATTACH, P_THANKS, SIGN])
+    greet = f"Hi {name}," if name else "Hi,"
+    if followup:
+        paras = [greet, F_1.format(company=company), F_2, F_3, SIGN_F]
+    else:
+        # Build body paragraphs; skip empty strings (P_THANKS is "")
+        paras = [p for p in [greet, P_INTRO, P_EXP, P_CTA.format(company=company),
+                              P_ATTACH, SIGN] if p]
     plain = "\n\n".join(paras)
-    plain = plain.replace("[[LI]]", f"LinkedIn ({C.LINKEDIN})").replace("[[GH]]", f"GitHub ({C.GITHUB})")
+    plain = (plain
+             .replace("[[LI]]", f"LinkedIn: {C.LINKEDIN}")
+             .replace("[[GH]]", f"GitHub: {C.GITHUB}"))
     h = "".join("<p>" + html.escape(p).replace("\n", "<br>") + "</p>" for p in paras)
     h = (h.replace("[[LI]]", f'<a href="{C.LINKEDIN}">LinkedIn</a>')
            .replace("[[GH]]", f'<a href="{C.GITHUB}">GitHub</a>'))
@@ -351,8 +358,42 @@ def do_replies(c, force=False):
     return found
 
 
-# ------------------------------------------------------------------ commands
-def cmd_replies(a):
+def cmd_mark_invalid(a):
+    """Mark one or more emails as 'invalid' (person left / address defunct)."""
+    c = C.db()
+    marked = 0
+    for em in a.emails:
+        em = em.strip().lower()
+        row = c.execute("SELECT status FROM contacts WHERE email=?", (em,)).fetchone()
+        if not row:
+            print(f"  NOT FOUND in DB: {em}")
+            continue
+        reason = a.reason or "Marked invalid by user (person left / email defunct)"
+        c.execute("UPDATE contacts SET status='invalid', note=? WHERE email=?", (reason, em))
+        c.commit()
+        audit("MARKED_INVALID", em, reason)
+        print(f"  MARKED INVALID: {em}  ({reason})")
+        marked += 1
+    if marked:
+        C.build_excel()
+        print(f"\n{marked} email(s) marked as 'invalid'. Excel updated.")
+    return 0
+
+
+def cmd_mark_bounced_as_invalid(a):
+    """Optionally re-label all 'bounced' rows as 'invalid' in one shot."""
+    c = C.db()
+    rows = c.execute("SELECT email FROM contacts WHERE status='bounced'").fetchall()
+    for r in rows:
+        c.execute("UPDATE contacts SET status='invalid', note='Auto-reclassified from bounced: address not deliverable / person left' WHERE email=?",
+                  (r["email"],))
+    c.commit()
+    audit("RECLASSIFY", "", f"{len(rows)} bounced contacts reclassified as invalid")
+    C.build_excel()
+    print(f"{len(rows)} 'bounced' contacts reclassified as 'invalid'. Excel updated.")
+    return 0
+
+
     c = C.db()
     try:
         n = do_replies(c, force=True)
@@ -384,6 +425,12 @@ def cmd_jobs(a):
     return jobs.run_jobs(auto=getattr(a, "auto", False), notify=not a.no_notify)
 
 
+def cmd_boards(a):
+    """Search LinkedIn, Indeed, Glassdoor, Naukri for fresher SDE jobs posted in last N hours."""
+    import job_boards
+    return job_boards.run(hours_old=a.hours, dry_run=a.dry_run)
+
+
 # ------------------------------------------------------------------ main
 def main(argv=None):
     p   = argparse.ArgumentParser(description="Job outreach automation")
@@ -393,18 +440,34 @@ def main(argv=None):
     f.add_argument("--min-days", type=int, default=5)
     f.add_argument("--dry-run",  action="store_true")
 
+    mi = sub.add_parser("mark-invalid",
+                        help="mark one or more emails as invalid (person left / address defunct)")
+    mi.add_argument("emails", nargs="+", help="email address(es) to mark")
+    mi.add_argument("--reason", default="", help="optional note explaining why")
+
+    sub.add_parser("reclassify-bounced",
+                   help="re-label all 'bounced' rows as 'invalid' in one shot")
+
     sub.add_parser("replies", help="check Gmail inbox for replies and bounces")
     sub.add_parser("status",  help="quick counts")
     sub.add_parser("report",  help="rebuild the Excel tracker")
 
-    j = sub.add_parser("jobs", help="find fresher openings and notify")
+    b = sub.add_parser("boards",
+                        help="search LinkedIn/Indeed/Glassdoor/Naukri for fresher SDE jobs posted in last 24h")
+    b.add_argument("--hours",   type=int, default=24,  help="hours window (default 24)")
+    b.add_argument("--dry-run", action="store_true",   help="print only, don't email or save")
+
+    j = sub.add_parser("jobs", help="find fresher openings from company ATS boards and notify")
     j.add_argument("--auto",      action="store_true")
     j.add_argument("--no-notify", action="store_true")
 
     a = p.parse_args(argv)
     try:
         code = {"followup": cmd_followup, "replies": cmd_replies,
-                "status": cmd_status, "report": cmd_report, "jobs": cmd_jobs}[a.cmd](a)
+                "status": cmd_status, "report": cmd_report, "jobs": cmd_jobs,
+                "boards": cmd_boards,
+                "mark-invalid": cmd_mark_invalid,
+                "reclassify-bounced": cmd_mark_bounced_as_invalid}[a.cmd](a)
         if a.cmd != "status":
             try:
                 C.build_excel()

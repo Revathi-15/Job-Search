@@ -414,6 +414,7 @@ def build_excel():
     red = PatternFill("solid", fgColor="FCE4D6")
     yellow = PatternFill("solid", fgColor="FFF2CC")
     link_font = Font(color="0563C1", underline="single")
+    orange = PatternFill("solid", fgColor="F4B942")
     WRAP = Alignment(wrap_text=True, vertical="top")
 
     def style_header(ws, row=1):
@@ -470,7 +471,8 @@ def build_excel():
         ("Follow-ups sent", q("SELECT COUNT(*) FROM contacts WHERE followup_at IS NOT NULL")),
         ("Replies received", replied),
         ("Reply rate", f"{(100 * replied / sent_total):.1f}%" if sent_total else "-"),
-        ("Bounced / invalid address", q("SELECT COUNT(*) FROM contacts WHERE status='bounced'")),
+        ("Bounced (server rejected - bad address)", q("SELECT COUNT(*) FROM contacts WHERE status='bounced'")),
+        ("Invalid (person left / email defunct)", q("SELECT COUNT(*) FROM contacts WHERE status='invalid'")),
         ("Failed", q("SELECT COUNT(*) FROM contacts WHERE status='failed'")),
         ("Uncertain (check Gmail Sent folder)", q("SELECT COUNT(*) FROM contacts WHERE status='uncertain'")),
         ("Skipped (personal / no-reply emails)", q("SELECT COUNT(*) FROM contacts WHERE status='skipped'")),
@@ -535,7 +537,10 @@ def build_excel():
                    _fmt(r["sent_at"]), _fmt(r["followup_at"]), "Yes" if r["replied"] else "No",
                    _fmt(r["reply_at"]), delay, r["reply_type"], _safe(r["reply_snippet"]),
                    _safe(r["note"]), r["my_notes"]])
-        fills.append(green if r["replied"] else red if r["status"] in ("bounced", "failed", "uncertain") else None)
+        fills.append(green if r["replied"] else
+                     red if r["status"] in ("bounced", "failed") else
+                     orange if r["status"] == "invalid" else
+                     yellow if r["status"] == "uncertain" else None)
     style_header(ws)
     for i, f in enumerate(fills, 2):
         if f:

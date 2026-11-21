@@ -33,14 +33,33 @@ SENIOR = re.compile(r"\b(senior|sr\.?|staff|principal|lead|manager|director|arch
                     r"fellow|ii|iii|iv|2|3|4|5|l[3-9]|e[4-9])\b", re.I)
 STRONG = re.compile(r"\b(sde[ -]?(1|i)|software (development )?engineer[ -]?(1|i)|engineer[ -]?(1|i)|"
                     r"new[ -]grad(uate)?|graduate|entry[ -]level|fresher|junior|associate|trainee|"
-                    r"early career|campus|university|apprentice|2025|2026|2027)\b", re.I)
+                    r"early career|campus|university|apprentice|"
+                    r"2026\s*(batch|passout|pass.?out|graduate)?|2025\s*(batch|passout)?|2027\s*(batch|passout)?)\b", re.I)
 INTERN = re.compile(r"\b(intern|internship)\b", re.I)
 INDIA = ["india", "bengaluru", "bangalore", "hyderabad", "pune", "chennai", "mumbai", "gurgaon", "gurugram",
          "noida", "delhi", "kolkata", "ahmedabad", "kochi", "coimbatore", "jaipur", "indore"]
 INDIA += [x.strip().lower() for x in C.env("EXTRA_LOCATIONS").split(",") if x.strip()]
 
 
-def classify_job(title):
+MIN_SALARY_LPA = float(C.env("MIN_SALARY_LPA", "18"))   # skip jobs below this (when salary is listed)
+
+
+def salary_lpa(text):
+    """Extract the max LPA figure from a job title / description string. Returns None if not found."""
+    if not text:
+        return None
+    # patterns: "18 LPA", "18-24 LPA", "₹18L", "INR 18,00,000", "1800000"
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:[-–]\s*\d+(?:\.\d+)?)?\s*(?:lpa|l\.p\.a|lakhs?/yr|lac)", text, re.I)
+    if m:
+        return float(m.group(1))
+    m = re.search(r"(?:inr|₹|rs\.?)\s*(\d[\d,]*)", text, re.I)
+    if m:
+        v = float(m.group(1).replace(",", ""))
+        return round(v / 100000, 1)
+    return None
+
+
+
     """Returns fit label, or None if not relevant for a fresher software role."""
     if not TECH.search(title) or NON_TECH.search(title):
         return None
@@ -178,7 +197,7 @@ def desktop_notify(title, message):
         return False
 
 
-def email_self(subject, body):
+def email_self(subject, body, jobs_list=None):
     if not (C.NOTIFY_EMAIL and C.GMAIL_APP_PASSWORD):
         return False
     m = EmailMessage()
@@ -186,6 +205,57 @@ def email_self(subject, body):
     m["To"] = C.GMAIL_USER
     m["Subject"] = subject
     m.set_content(body)
+    # Build rich HTML version when job list is provided
+    if jobs_list:
+        rows_html = ""
+        for j in jobs_list:
+            fit_color = "#2e7d32" if "Strong" in (j.get("fit") or "") else "#e65100"
+            salary_note = ""
+            lpa = salary_lpa(j.get("title", "") + " " + (j.get("notes") or ""))
+            if lpa:
+                salary_note = f"<br><small>Salary hint: ~{lpa} LPA</small>"
+            rows_html += f"""
+<tr>
+  <td style='padding:10px;border-bottom:1px solid #eee;'>
+    <strong>{j['company']}</strong><br>
+    <span style='color:{fit_color};font-weight:bold;'>{j['fit']}</span>
+    {salary_note}
+  </td>
+  <td style='padding:10px;border-bottom:1px solid #eee;'>{j['title']}</td>
+  <td style='padding:10px;border-bottom:1px solid #eee;'>{j['location']}</td>
+  <td style='padding:10px;border-bottom:1px solid #eee;'>
+    <a href='{j['url']}' style='background:#1565c0;color:#fff;padding:6px 14px;
+       border-radius:4px;text-decoration:none;font-weight:bold;'>APPLY NOW</a><br>
+    <small style='color:#666;'>{j['url_status']}</small>
+  </td>
+  <td style='padding:10px;border-bottom:1px solid #eee;font-size:12px;'>
+    <a href='{j['alumni_link']}'>NIT DGP alumni</a><br>
+    <a href='{j['recruiter_link']}'>Recruiters</a>
+    {"<br><em>Contacts: " + (j['referrals'] or '') + "</em>" if j.get('referrals') else ''}
+  </td>
+</tr>"""
+        html_body = f"""
+<html><body style='font-family:Arial,sans-serif;max-width:900px;margin:auto;'>
+<h2 style='color:#1565c0;'>🎯 New Fresher Job Openings (≥{MIN_SALARY_LPA} LPA or unspecified)</h2>
+<p>Found <strong>{len(jobs_list)}</strong> matching opening(s). Apply to <em>Strong</em> ones first.</p>
+<table style='width:100%;border-collapse:collapse;'>
+  <tr style='background:#1565c0;color:#fff;'>
+    <th style='padding:10px;text-align:left;'>Company</th>
+    <th style='padding:10px;text-align:left;'>Role</th>
+    <th style='padding:10px;text-align:left;'>Location</th>
+    <th style='padding:10px;text-align:left;'>Apply</th>
+    <th style='padding:10px;text-align:left;'>Resources</th>
+  </tr>
+  {rows_html}
+</table>
+<hr>
+<p style='font-size:12px;color:#888;'>
+  Auto-sent by your job-search script • 
+  Job ID format: <code>ats:slug:id</code> (use in <code>python outreach.py jobs</code>) •
+  Open <strong>Job_Outreach_Tracker.xlsx → Jobs (Fresher)</strong> for full details.
+</p>
+</body></html>"""
+        m.add_alternative(html_body, subtype="html")
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context(), timeout=60) as s:
             s.login(C.GMAIL_USER, C.GMAIL_APP_PASSWORD)
@@ -324,25 +394,46 @@ def run_jobs(auto=False, notify=True):
     pending = [dict(r) for r in c.execute(
         "SELECT * FROM jobs WHERE notified=0 AND (url_status LIKE 'OK%' OR url_status LIKE 'UNVERIFIED%') "
         "ORDER BY CASE WHEN fit LIKE 'Strong%' THEN 0 ELSE 1 END, company")]
-    if pending and notify:
+
+    # Filter: keep jobs where salary is at or above MIN_SALARY_LPA, or salary is not mentioned at all
+    def salary_ok(j):
+        lpa = salary_lpa((j.get("title") or "") + " " + (j.get("notes") or ""))
+        return lpa is None or lpa >= MIN_SALARY_LPA
+
+    pending_filtered = [j for j in pending if salary_ok(j)]
+
+    if pending_filtered and notify:
+        strong = [j for j in pending_filtered if "Strong" in (j.get("fit") or "")]
+        label = f"{len(pending_filtered)} new fresher opening(s)"
+        if strong:
+            label += f" incl. {len(strong)} Strong fit"
         if first_run:
-            msg = f"{len(pending)} fresher-friendly openings found across {checked} company boards. See the Excel 'Jobs (Fresher)' sheet."
+            msg = (f"{len(pending_filtered)} fresher-friendly openings found (≥{MIN_SALARY_LPA} LPA or unspecified) "
+                   f"across {checked} company boards. See Excel → Jobs (Fresher).")
             desktop_notify("Job watcher: first scan done", msg)
-            email_self(f"Job watcher: {len(pending)} fresher openings found", msg + "\n\n" + "\n".join(describe(j) for j in pending[:40]))
+            email_self(f"Job watcher: {len(pending_filtered)} fresher openings found (≥{MIN_SALARY_LPA} LPA)",
+                       msg + "\n\n" + "\n".join(describe(j) for j in pending_filtered[:40]),
+                       jobs_list=pending_filtered[:40])
             audit("NOTIFIED", "", msg, "Open Job_Outreach_Tracker.xlsx -> 'Jobs (Fresher)' and apply to the Strong ones first")
         else:
-            for j in pending[:3]:
+            for j in pending_filtered[:3]:
                 desktop_notify(f"New job: {j['company']}", f"{j['title']} - {j['fit']}")
-            if len(pending) > 3:
-                desktop_notify("Job watcher", f"+{len(pending) - 3} more new openings. Check the Excel.")
-            email_self(f"NEW fresher job(s): {pending[0]['title']} @ {pending[0]['company']}"
-                       + (f" (+{len(pending) - 1} more)" if len(pending) > 1 else ""),
-                       "\n".join(describe(j) for j in pending))
-            audit("NOTIFIED", "", f"{len(pending)} new openings sent as notification",
-                  "Apply soon: " + "; ".join(f"{j['company']} - {j['title']}" for j in pending[:5]))
-        for j in pending:
-            c.execute("UPDATE jobs SET notified=1 WHERE job_id=?", (j["job_id"],))
-        c.commit()
+            if len(pending_filtered) > 3:
+                desktop_notify("Job watcher", f"+{len(pending_filtered) - 3} more new openings. Check the Excel.")
+            top = pending_filtered[0]
+            email_self(
+                f"NEW fresher job(s): {top['title']} @ {top['company']}"
+                + (f" (+{len(pending_filtered) - 1} more)" if len(pending_filtered) > 1 else "")
+                + f" [≥{MIN_SALARY_LPA} LPA]",
+                "\n".join(describe(j) for j in pending_filtered),
+                jobs_list=pending_filtered,
+            )
+            audit("NOTIFIED", "", f"{len(pending_filtered)} new openings sent as notification",
+                  "Apply soon: " + "; ".join(f"{j['company']} - {j['title']}" for j in pending_filtered[:5]))
+    # Mark ALL as notified (including below-salary ones, so they don't spam on next run)
+    for j in pending:
+        c.execute("UPDATE jobs SET notified=1 WHERE job_id=?", (j["job_id"],))
+    c.commit()
     if new_count or not auto:
         audit("JOBS_SUMMARY", "", f"Checked {checked} company boards, {new_count} new matching openings",
               "" if new_count == 0 else "See Excel -> Jobs (Fresher)")
